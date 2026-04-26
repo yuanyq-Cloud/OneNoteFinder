@@ -13,8 +13,15 @@ namespace OneFinder
 
         private void InitializeComponent()
         {
-            components = new System.ComponentModel.Container();
-            AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+            SuspendLayout();
+            // 
+            // MainForm
+            // 
+            AutoScaleDimensions = new SizeF(13F, 28F);
+            AutoScaleMode = AutoScaleMode.Font;
+            ClientSize = new Size(771, 563);
+            Name = "MainForm";
+            ResumeLayout(false);
         }
     }
 }

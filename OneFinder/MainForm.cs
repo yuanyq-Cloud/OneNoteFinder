@@ -126,17 +126,8 @@ namespace OneFinder
                 Location = new Point(0, 1)
             };
 
-            //var subtitleLabel = new Label
-            //{
-            //    Text = "OneNote 全文搜索工具",
-            //    Font = new Font("Microsoft YaHei", 9f),
-            //    ForeColor = ModernColors.TextSecondary,
-            //    AutoSize = true,
-            //    Location = new Point(20, 1)
-            //};
 
             titlePanel.Controls.Add(titleLabel);
-            //titlePanel.Controls.Add(subtitleLabel);
 
             // ── Unified Search Container ─────────────────────────────────────────
             var searchContainer = new SearchBoxContainer

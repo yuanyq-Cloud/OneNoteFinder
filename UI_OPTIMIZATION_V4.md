@@ -1,4 +1,4 @@
-# OneFind UI 优化 v4.0
+# OneFinder UI 优化 v4.0
 
 ## 🎯 本次优化目标
 
@@ -326,4 +326,4 @@ private string CleanHtmlContent(string text)
 
 **最后更新**：2025-01-XX  
 **优化作者**：GitHub Copilot  
-**项目地址**：OneFind - OneNote全文搜索工具
+**项目地址**：OneFinder - OneNote 全文搜索工具

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    OneFind 一键构建 + 打包 MSI
+    OneFinder 一键构建 + 打包 MSI
 
 .DESCRIPTION
     步骤：
@@ -23,10 +23,10 @@ param(
 $ErrorActionPreference = "Stop"
 
 $Root           = $PSScriptRoot
-$AppProject     = Join-Path $Root "OneFind\OneFind.csproj"
+$AppProject     = Join-Path $Root "OneFinder\OneFinder.csproj"
 $WxsFile        = Join-Path $Root "installer\Package.wxs"
-$PublishDir     = Join-Path $Root "OneFind\bin\$Configuration\net8.0-windows\win-x64\publish\"
-$OutputMsi      = Join-Path $Root "installer\OneFindSetup.msi"
+$PublishDir     = Join-Path $Root "OneFinder\bin\$Configuration\net8.0-windows\win-x64\publish\"
+$OutputMsi      = Join-Path $Root "installer\OneFinderSetup.msi"
 
 # ── 验证前置工具 ──────────────────────────────────────────────
 function Require-Command([string]$name) {
@@ -41,7 +41,7 @@ Require-Command "wix"
 
 # ── 步骤 1：发布自包含单文件 EXE ─────────────────────────────
 Write-Host ""
-Write-Host ">>> [1/2] 发布 OneFind (self-contained, win-x64, single-file)..." -ForegroundColor Cyan
+Write-Host ">>> [1/2] 发布 OneFinder (self-contained, win-x64, single-file)..." -ForegroundColor Cyan
 
 dotnet publish $AppProject `
     --configuration $Configuration `
@@ -55,7 +55,7 @@ dotnet publish $AppProject `
 if ($LASTEXITCODE -ne 0) { Write-Error "dotnet publish 失败"; exit 1 }
 
 # 确认 EXE 存在
-$ExePath = Join-Path $PublishDir "OneFind.exe"
+$ExePath = Join-Path $PublishDir "OneFinder.exe"
 if (-not (Test-Path $ExePath)) {
     Write-Error "未找到发布产物：$ExePath"
     exit 1
