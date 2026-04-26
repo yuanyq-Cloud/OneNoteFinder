@@ -15,14 +15,14 @@
     <!--
       Check for .NET 8 Desktop Runtime (x64).
       OneFinder.exe is published as framework-dependent, so the runtime must be present.
-      The registry key is written by the .NET installer under HKLM.
+      We search the well-known install path because the SDK-only install does not write
+      sharedfx registry keys (only the standalone Runtime installer does).
     -->
     <Property Id="DOTNET8_DESKTOP_INSTALLED">
-      <RegistrySearch Id="SearchDotNet8Desktop"
-        Root="HKLM"
-        Key="SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.WindowsDesktop.App"
-        Name="8.0.0"
-        Type="raw" />
+      <DirectorySearch Id="SearchDotNetDir"
+        Path="[ProgramFiles64Folder]dotnet\shared\Microsoft.WindowsDesktop.App"
+        Depth="1"
+        AssignToProperty="yes" />
     </Property>
     <Launch Condition="Installed OR DOTNET8_DESKTOP_INSTALLED"
             Message="OneFinder requires the .NET 8 Desktop Runtime (x64). Please download and install it from https://aka.ms/dotnet8-desktop-runtime-win-x64 and then run this installer again." />
