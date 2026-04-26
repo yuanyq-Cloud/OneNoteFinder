@@ -5,8 +5,7 @@
     <tabs>
       <tab idMso="TabHome">
         <group id="OneFinder_Group"
-               label="OneFinder"
-               insertAfterMso="GroupEditing">
+               label="OneFinder">
           <button id="OneFinder_SearchButton"
                   label="全文搜索"
                   screentip="打开 OneFinder 全文搜索"

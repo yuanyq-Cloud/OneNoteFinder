@@ -1,8 +1,6 @@
-﻿// OneFinder.AddIn — OneNote COM 插件（.NET Framework 4.8）
-// 架构参照 OneMore: https://github.com/stevencohn/OneMore/blob/main/OneMore/AddIn.cs
-//
-// 加载链：OneNote.exe → mscoree.dll → CLR v4 → 本 DLL
-// 注册表键：HKCU\SOFTWARE\Microsoft\Office\OneNote\AddIns\OneFinder.AddIn
+// OneFinder.AddIn - OneNote COM addin (.NET Framework 4.8)
+// Load chain: OneNote.exe -> mscoree.dll -> CLR v4 -> this DLL
+// Registry: HKCU\SOFTWARE\Microsoft\Office\OneNote\AddIns\OneFinder.AddIn
 
 using System;
 using System.Diagnostics;
@@ -14,105 +12,164 @@ using Microsoft.Office.Core;
 
 namespace OneFinder.AddIn
 {
-    /// <summary>
-    /// OneNote COM 插件主类。
-    /// CLSID / ProgID 必须与安装包写入注册表的值完全一致。
-    /// </summary>
     [ComVisible(true)]
-    [Guid(AddIn.AddinClsid)]
-    [ProgId(AddIn.AddinProgId)]
-    [ClassInterface(ClassInterfaceType.None)]
+    [Guid(AddinClsid)]
+    [ProgId(AddinProgId)]
     public class AddIn : IDTExtensibility2, IRibbonExtensibility
     {
-        // 修改这两个常量时，安装包的 WXS 也要同步更改
         public const string AddinClsid  = "6B29FC40-CA47-1067-B31D-00DD010662DA";
         public const string AddinProgId = "OneFinder.AddIn";
 
-        private IRibbonUI? _ribbon;
+        private IRibbonUI _ribbon;
 
-        // ── IDTExtensibility2 ────────────────────────────────────────────────
+        // ------------------------------------------------------------------ //
+        //  Helpers - all wrapped in try/catch, nothing runs at class load time
+        // ------------------------------------------------------------------ //
 
-        public void OnConnection(object Application, ext_ConnectMode ConnectMode,
-            object AddInInst, ref Array custom) { }
-
-        public void OnDisconnection(ext_DisconnectMode RemoveMode, ref Array custom) { }
-
-        public void OnAddInsUpdate(ref Array custom) { }
-
-        public void OnStartupComplete(ref Array custom) { }
-
-        public void OnBeginShutdown(ref Array custom) { }
-
-        // ── IRibbonExtensibility ─────────────────────────────────────────────
-
-        /// <summary>
-        /// OneNote 启动时调用，返回 Ribbon 自定义 XML。
-        /// </summary>
-        public string GetCustomUI(string RibbonID)
-        {
-            var asm = Assembly.GetExecutingAssembly();
-            // 嵌入资源名格式：<RootNamespace>.<文件名>
-            using (var stream = asm.GetManifestResourceStream("OneFinder.AddIn.Ribbon.xml"))
-            {
-                if (stream == null) return string.Empty;
-                using (var reader = new StreamReader(stream))
-                    return reader.ReadToEnd();
-            }
-        }
-
-        // ── Ribbon 回调 ──────────────────────────────────────────────────────
-
-        public void RibbonLoaded(IRibbonUI ribbon)
-        {
-            _ribbon = ribbon;
-        }
-
-        /// <summary>
-        /// 按下"全文搜索"按钮：启动或激活 OneFinder.exe。
-        /// </summary>
-        public void OnSearchClick(IRibbonControl control)
+        private static string GetInstallDir()
         {
             try
             {
-                var dir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-                var exe = Path.Combine(dir, "OneFinder.exe");
-
-                if (!File.Exists(exe))
+                // Prefer CodeBase (the real on-disk path even if shadow-copied)
+                var codeBase = Assembly.GetExecutingAssembly().CodeBase;
+                if (!string.IsNullOrEmpty(codeBase))
                 {
-                    System.Windows.Forms.MessageBox.Show(
-                        string.Format("未找到 OneFinder.exe：\n{0}", exe),
-                        "OneFinder",
-                        System.Windows.Forms.MessageBoxButtons.OK,
-                        System.Windows.Forms.MessageBoxIcon.Warning);
-                    return;
+                    var uri = new Uri(codeBase);
+                    if (uri.IsFile)
+                        return Path.GetDirectoryName(uri.LocalPath);
                 }
+            }
+            catch { }
 
-                // 如果已运行则前置窗口，否则启动
-                var procName = Path.GetFileNameWithoutExtension(exe);
-                var procs = Process.GetProcessesByName(procName);
-                if (procs.Length > 0 && procs[0].MainWindowHandle != IntPtr.Zero)
+            try
+            {
+                // Fallback: Location
+                var loc = Assembly.GetExecutingAssembly().Location;
+                if (!string.IsNullOrEmpty(loc))
+                    return Path.GetDirectoryName(loc);
+            }
+            catch { }
+
+            // Last resort: same directory as this process
+            return AppDomain.CurrentDomain.BaseDirectory;
+        }
+
+        private static void Log(string msg)
+        {
+            try
+            {
+                var path = Path.Combine(Path.GetTempPath(), "OneFinder.AddIn.log");
+                File.AppendAllText(path,
+                    string.Format("[{0:HH:mm:ss}] {1}{2}",
+                        DateTime.Now, msg, Environment.NewLine));
+            }
+            catch { }
+        }
+
+        // ------------------------------------------------------------------ //
+        //  IDTExtensibility2
+        // ------------------------------------------------------------------ //
+
+        public void OnConnection(object Application, ext_ConnectMode ConnectMode,
+            object AddInInst, ref Array custom)
+        {
+            Log(string.Format("OnConnection ConnectMode={0}", ConnectMode));
+        }
+
+        public void OnDisconnection(ext_DisconnectMode RemoveMode, ref Array custom)
+        {
+            Log(string.Format("OnDisconnection RemoveMode={0}", RemoveMode));
+        }
+
+        public void OnAddInsUpdate(ref Array custom) { }
+
+        public void OnStartupComplete(ref Array custom)
+        {
+            Log("OnStartupComplete");
+        }
+
+        public void OnBeginShutdown(ref Array custom) { }
+
+        // ------------------------------------------------------------------ //
+        //  IRibbonExtensibility
+        // ------------------------------------------------------------------ //
+
+        public string GetCustomUI(string RibbonID)
+        {
+            Log(string.Format("GetCustomUI RibbonID={0}", RibbonID));
+            try
+            {
+                var asm = Assembly.GetExecutingAssembly();
+                using (var stream = asm.GetManifestResourceStream("OneFinder.AddIn.Ribbon.xml"))
                 {
-                    NativeMethods.ShowWindow(procs[0].MainWindowHandle, 9);  // SW_RESTORE
-                    NativeMethods.SetForegroundWindow(procs[0].MainWindowHandle);
-                }
-                else
-                {
-                    var psi = new ProcessStartInfo
+                    if (stream == null)
                     {
-                        FileName = exe,
-                        UseShellExecute = true,
-                        WorkingDirectory = dir
-                    };
-                    Process.Start(psi);
+                        Log("ERROR: embedded Ribbon.xml not found");
+                        return string.Empty;
+                    }
+                    using (var reader = new StreamReader(stream))
+                    {
+                        var xml = reader.ReadToEnd();
+                        Log(string.Format("GetCustomUI OK, {0} chars", xml.Length));
+                        return xml;
+                    }
                 }
             }
             catch (Exception ex)
             {
-                System.Windows.Forms.MessageBox.Show(
-                    string.Format("启动 OneFinder 失败：\n{0}", ex.Message),
-                    "OneFinder",
-                    System.Windows.Forms.MessageBoxButtons.OK,
-                    System.Windows.Forms.MessageBoxIcon.Error);
+                Log(string.Format("GetCustomUI exception: {0}", ex.Message));
+                return string.Empty;
+            }
+        }
+
+        // ------------------------------------------------------------------ //
+        //  Ribbon callbacks
+        // ------------------------------------------------------------------ //
+
+        public void RibbonLoaded(IRibbonUI ribbon)
+        {
+            _ribbon = ribbon;
+            Log("RibbonLoaded OK");
+        }
+
+        public void OnSearchClick(IRibbonControl control)
+        {
+            Log("OnSearchClick fired");
+            try
+            {
+                var dir = GetInstallDir();
+                var exe = Path.Combine(dir, "OneFinder.exe");
+                Log(string.Format("exe path={0} exists={1}", exe, File.Exists(exe)));
+
+                if (!File.Exists(exe))
+                {
+                    Log(string.Format("ERROR: exe not found at {0}", exe));
+                    return;
+                }
+
+                var procName = Path.GetFileNameWithoutExtension(exe);
+                var procs = Process.GetProcessesByName(procName);
+                if (procs.Length > 0 && procs[0].MainWindowHandle != IntPtr.Zero)
+                {
+                    Log("already running - bring to front");
+                    NativeMethods.ShowWindow(procs[0].MainWindowHandle, 9);
+                    NativeMethods.SetForegroundWindow(procs[0].MainWindowHandle);
+                }
+                else
+                {
+                    Log(string.Format("starting {0}", exe));
+                    var p = Process.Start(new ProcessStartInfo
+                    {
+                        FileName         = exe,
+                        UseShellExecute  = true,
+                        WorkingDirectory = dir
+                    });
+                    Log(string.Format("started pid={0}", p == null ? -1 : p.Id));
+                }
+            }
+            catch (Exception ex)
+            {
+                Log(string.Format("OnSearchClick exception: {0}\n{1}", ex.Message, ex.StackTrace));
             }
         }
     }

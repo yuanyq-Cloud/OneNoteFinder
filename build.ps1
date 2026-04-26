@@ -29,7 +29,7 @@ $AppProject   = Join-Path $Root "OneFinder\OneFinder.csproj"
 $AddinProject = Join-Path $Root "OneFinder.AddIn\OneFinder.AddIn.csproj"
 $WxsFile      = Join-Path $Root "installer\Package.wxs"
 $PublishDir   = Join-Path $Root "OneFinder\bin\$Configuration\net8.0-windows\win-x64\publish\"
-$AddinDir     = Join-Path $Root "OneFinder.AddIn\bin\x64\$Configuration\net48\"
+$AddinDir     = Join-Path $Root "OneFinder.AddIn\bin\$Configuration\net48\"
 $OutputMsi    = Join-Path $Root "installer\OneFinderSetup.msi"
 
 function Find-MSBuild {
@@ -67,7 +67,7 @@ Write-Host "    MSBuild: $MSBuild" -ForegroundColor Gray
 Write-Host ""
 Write-Host ">>> [1/3] Building OneFinder.AddIn (.NET Framework 4.8)..." -ForegroundColor Cyan
 
-& $MSBuild $AddinProject /p:Configuration=$Configuration /p:Platform=x64 /v:minimal /nologo
+& $MSBuild $AddinProject /p:Configuration=$Configuration /p:Platform=AnyCPU /v:minimal /nologo
 
 if ($LASTEXITCODE -ne 0) { Write-Error "AddIn build failed"; exit 1 }
 
