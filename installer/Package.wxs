@@ -24,9 +24,8 @@
         Name="8.0.0"
         Type="raw" />
     </Property>
-    <Condition Message="OneFinder requires the .NET 8 Desktop Runtime (x64). Please download and install it from https://aka.ms/dotnet8-desktop-runtime-win-x64 and then run this installer again.">
-      <![CDATA[Installed OR DOTNET8_DESKTOP_INSTALLED]]>
-    </Condition>
+    <Launch Condition="Installed OR DOTNET8_DESKTOP_INSTALLED"
+            Message="OneFinder requires the .NET 8 Desktop Runtime (x64). Please download and install it from https://aka.ms/dotnet8-desktop-runtime-win-x64 and then run this installer again." />
 
     <Feature Id="Main" Title="OneFinder" Level="1">
       <ComponentGroupRef Id="AppFiles" />
@@ -78,7 +77,7 @@
               KeyPath="yes" />
       </Component>
     </ComponentGroup>
-  </Fragment>  </Fragment>
+  </Fragment>
 
   <!-- OneNote addin DLL (.NET Framework 4.8, loaded by OneNote via mscoree.dll) -->
   <Fragment>
@@ -93,7 +92,7 @@
 
   <!--
     COM registration + OneNote addin activation
-    Mirrors: https://github.com/stevencohn/OneMore/blob/main/register-onemore.reg
+    See: https://github.com/stevencohn/OneMore/blob/main/register-onemore.reg
 
     CLSID  : {6B29FC40-CA47-1067-B31D-00DD010662DA}
     ProgID : OneFinder.AddIn
