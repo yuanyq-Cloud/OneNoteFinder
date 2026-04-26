@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Xml;
 using System.Xml.Linq;
 using Microsoft.Office.Interop.OneNote;
 using Application = Microsoft.Office.Interop.OneNote.Application;
@@ -101,7 +103,7 @@ namespace OneFinder
         private static readonly Regex HtmlTagRegex = new(@"<[^>]+>", RegexOptions.Singleline | RegexOptions.Compiled);
         private static readonly Regex HeadingElementNameRegex = new(@"^h[1-6]$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static readonly Regex LiteralCDataRegex = new(@"<!\[CDATA\[(.*?)\]\]>", RegexOptions.Singleline | RegexOptions.Compiled);
-        private static readonly Regex WhitespaceRegex = new(@"\s+", RegexOptions.Compiled);
+        private const StringComparison SearchComparison = StringComparison.OrdinalIgnoreCase;
 
         public OneNoteService()
         {
@@ -138,9 +140,11 @@ namespace OneFinder
         /// </summary>
         /// <param name="query">搜索关键词</param>
         /// <param name="currentNotebookOnly">是否仅搜索当前笔记本</param>
+        /// <param name="fastSearch">是否启用快速搜索（使用快速路径和粗过滤）</param>
         /// <param name="progress">进度回调</param>
         public List<PageResult> Search(string query, bool currentNotebookOnly = false,
-            Action<string>? progress = null, CancellationToken cancellationToken = default)
+            bool fastSearch = false, Action<string>? progress = null,
+            CancellationToken cancellationToken = default)
         {
             if (_app == null) throw new ObjectDisposedException(nameof(OneNoteService));
             if (string.IsNullOrWhiteSpace(query)) return new List<PageResult>();
@@ -208,13 +212,20 @@ namespace OneFinder
                             // 获取页面完整 XML（包含所有文本内容）
                             _app.GetPageContent(pageId, out string pageXml,
                                 PageInfo.piAll, XMLSchema.xs2013);
-
-                            var pageDoc = XDocument.Parse(pageXml);
                             var snippets = new List<string>();
                             var hitObjectIds = new List<string>();
 
-                            // 提取所有 T 元素（文本节点）
-                            ExtractTextMatches(pageDoc, normalizedQuery, snippets, hitObjectIds);
+                            if (fastSearch)
+                            {
+                                ExtractTextMatchesFast(pageXml, normalizedQuery, snippets, hitObjectIds);
+                            }
+                            else
+                            {
+                                var pageDoc = XDocument.Parse(pageXml);
+
+                                // 提取所有 T 元素（文本节点）
+                                ExtractTextMatches(pageDoc, normalizedQuery, snippets, hitObjectIds, fastSearch: false);
+                            }
 
                             if (snippets.Count > 0)
                             {
@@ -235,23 +246,112 @@ namespace OneFinder
                         }
                     }
                 }
+
             }
 
             return results;
+        }
+
+        private void ExtractTextMatchesFast(string pageXml, string query,
+            List<string> snippets, List<string> hitObjectIds)
+        {
+            using var stringReader = new StringReader(pageXml);
+            using var xmlReader = XmlReader.Create(stringReader, new XmlReaderSettings
+            {
+                DtdProcessing = DtdProcessing.Prohibit,
+                IgnoreComments = true,
+                IgnoreProcessingInstructions = true,
+                IgnoreWhitespace = false,
+            });
+
+            var oeStack = new Stack<(int Depth, string? ObjectId)>();
+
+            while (xmlReader.Read())
+            {
+                switch (xmlReader.NodeType)
+                {
+                    case XmlNodeType.Element:
+                        if (xmlReader.LocalName == "OE")
+                        {
+                            oeStack.Push((xmlReader.Depth, xmlReader.GetAttribute("objectID")));
+
+                            if (xmlReader.IsEmptyElement)
+                            {
+                                oeStack.Pop();
+                            }
+
+                            continue;
+                        }
+
+                        if (xmlReader.LocalName != "T")
+                        {
+                            continue;
+                        }
+
+                        string rawText = xmlReader.ReadInnerXml();
+                        if (!MightContainQueryFast(rawText, query))
+                        {
+                            continue;
+                        }
+
+                        string text = BuildSearchableTextMirror(rawText, fastSearch: true);
+                        if (string.IsNullOrWhiteSpace(text))
+                        {
+                            continue;
+                        }
+
+                        int index = text.IndexOf(query, SearchComparison);
+                        if (index < 0)
+                        {
+                            continue;
+                        }
+
+                        snippets.Add(ExtractSnippet(text, index, query.Length));
+
+                        string? objectId = GetCurrentObjectId(oeStack);
+                        if (!string.IsNullOrEmpty(objectId))
+                        {
+                            hitObjectIds.Add(objectId);
+                        }
+
+                        if (snippets.Count >= 5)
+                        {
+                            return;
+                        }
+
+                        continue;
+
+                    case XmlNodeType.EndElement:
+                        if (xmlReader.LocalName == "OE")
+                        {
+                            while (oeStack.Count > 0 && oeStack.Peek().Depth >= xmlReader.Depth)
+                            {
+                                oeStack.Pop();
+                            }
+                        }
+
+                        break;
+                }
+            }
         }
 
         /// <summary>
         /// 从页面 XML 中提取包含匹配文本的片段
         /// </summary>
         private void ExtractTextMatches(XDocument pageDoc, string query, 
-            List<string> snippets, List<string> hitObjectIds)
+            List<string> snippets, List<string> hitObjectIds, bool fastSearch)
         {
             foreach (var textElement in pageDoc.Descendants(NS + "T"))
             {
-                string text = BuildSearchableTextMirror(textElement);
+                if (fastSearch && !MightContainQueryFast(textElement, query))
+                {
+                    continue;
+                }
+
+                string text = BuildSearchableTextMirror(textElement, fastSearch);
                 if (string.IsNullOrWhiteSpace(text)) continue;
 
-                int index = text.IndexOf(query, StringComparison.OrdinalIgnoreCase);
+                int index = text.IndexOf(query, SearchComparison);
 
                 if (index >= 0)
                 {
@@ -302,44 +402,54 @@ namespace OneFinder
         /// <summary>
         /// 为单个文本节点建立纯文本镜像：逐个子节点提取、清理 CDATA/HTML，再拼接搜索。
         /// </summary>
-        private string BuildSearchableTextMirror(XElement textElement)
+        private string BuildSearchableTextMirror(XElement textElement, bool fastSearch)
         {
+            if (fastSearch && !textElement.HasElements)
+            {
+                return CleanFragmentToPlainText(textElement.Value, fastSearch: true);
+            }
+
             var builder = new StringBuilder();
             foreach (var node in textElement.Nodes())
             {
-                AppendNodePlainText(node, builder);
+                AppendNodePlainText(node, builder, fastSearch);
             }
 
             if (builder.Length == 0)
             {
-                AppendPlainTextFragment(textElement.Value, builder);
+                AppendPlainTextFragment(textElement.Value, builder, fastSearch);
             }
 
             return NormalizeWhitespace(builder.ToString());
         }
 
-        private void AppendNodePlainText(XNode node, StringBuilder builder)
+        private string BuildSearchableTextMirror(string rawText, bool fastSearch)
+        {
+            return CleanFragmentToPlainText(rawText, fastSearch);
+        }
+
+        private void AppendNodePlainText(XNode node, StringBuilder builder, bool fastSearch)
         {
             switch (node)
             {
                 case XCData cdata:
-                    AppendPlainTextFragment(cdata.Value, builder);
+                    AppendPlainTextFragment(cdata.Value, builder, fastSearch);
                     break;
                 case XText text:
-                    AppendPlainTextFragment(text.Value, builder);
+                    AppendPlainTextFragment(text.Value, builder, fastSearch);
                     break;
                 case XElement element:
                     foreach (var child in element.Nodes())
                     {
-                        AppendNodePlainText(child, builder);
+                        AppendNodePlainText(child, builder, fastSearch);
                     }
                     break;
             }
         }
 
-        private void AppendPlainTextFragment(string fragment, StringBuilder builder)
+        private void AppendPlainTextFragment(string fragment, StringBuilder builder, bool fastSearch)
         {
-            string plainText = CleanFragmentToPlainText(fragment);
+            string plainText = CleanFragmentToPlainText(fragment, fastSearch);
             if (string.IsNullOrWhiteSpace(plainText)) return;
 
             if (builder.Length > 0 && !char.IsWhiteSpace(builder[builder.Length - 1]) && !char.IsWhiteSpace(plainText[0]))
@@ -350,9 +460,14 @@ namespace OneFinder
             builder.Append(plainText);
         }
 
-        private string CleanFragmentToPlainText(string text)
+        private string CleanFragmentToPlainText(string text, bool fastSearch)
         {
             if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+
+            if (fastSearch)
+            {
+                return CleanFragmentToPlainTextFast(text);
+            }
 
             text = StripLiteralCDataMarkers(text);
             text = HtmlDecodeRepeatedly(text);
@@ -370,6 +485,123 @@ namespace OneFinder
             text = StripLiteralCDataMarkers(text);
 
             return NormalizeWhitespace(text);
+        }
+
+        private string CleanFragmentToPlainTextFast(string text)
+        {
+            if (CanUsePlainTextFastPath(text))
+            {
+                return NormalizeWhitespace(text);
+            }
+
+            if (ContainsLiteralCData(text))
+            {
+                text = StripLiteralCDataMarkers(text);
+            }
+
+            if (ContainsHtmlEntity(text))
+            {
+                text = HtmlDecodeRepeatedly(text);
+            }
+
+            if (LooksLikeMarkup(text))
+            {
+                text = BlockBreakTagRegex.Replace(text, " ");
+                text = BlockClosingTagRegex.Replace(text, " ");
+                text = HtmlTagRegex.Replace(text, string.Empty);
+            }
+
+            if (ContainsHtmlEntity(text))
+            {
+                text = HtmlDecodeRepeatedly(text);
+            }
+
+            if (ContainsLiteralCData(text))
+            {
+                text = StripLiteralCDataMarkers(text);
+            }
+
+            return NormalizeWhitespace(text);
+        }
+
+        private bool MightContainQueryFast(XElement textElement, string query)
+        {
+            return MightContainQueryFast(textElement.Value, query);
+        }
+
+        private bool MightContainQueryFast(string rawText, string query)
+        {
+            if (string.IsNullOrWhiteSpace(rawText)) return false;
+
+            if (rawText.IndexOf(query, SearchComparison) >= 0)
+            {
+                return true;
+            }
+
+            if (ContainsCleanupSensitiveSyntax(rawText))
+            {
+                return true;
+            }
+
+            if (query.IndexOf(' ') >= 0 || ContainsNonSpaceWhitespace(rawText))
+            {
+                return NormalizeWhitespace(rawText).IndexOf(query, SearchComparison) >= 0;
+            }
+
+            return false;
+        }
+
+        private string? GetCurrentObjectId(Stack<(int Depth, string? ObjectId)> oeStack)
+        {
+            foreach (var (_, objectId) in oeStack)
+            {
+                if (!string.IsNullOrEmpty(objectId))
+                {
+                    return objectId;
+                }
+            }
+
+            return null;
+        }
+
+        private bool CanUsePlainTextFastPath(string text)
+        {
+            return !ContainsCleanupSensitiveSyntax(text);
+        }
+
+        private bool ContainsCleanupSensitiveSyntax(string text)
+        {
+            return LooksLikeMarkup(text)
+                || ContainsHtmlEntity(text)
+                || ContainsLiteralCData(text);
+        }
+
+        private bool LooksLikeMarkup(string text)
+        {
+            return text.IndexOf('<') >= 0 && text.IndexOf('>') >= 0;
+        }
+
+        private bool ContainsHtmlEntity(string text)
+        {
+            return text.IndexOf('&') >= 0;
+        }
+
+        private bool ContainsLiteralCData(string text)
+        {
+            return text.IndexOf("CDATA", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private bool ContainsNonSpaceWhitespace(string text)
+        {
+            foreach (char ch in text)
+            {
+                if (char.IsWhiteSpace(ch) && ch != ' ')
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private string TryConvertMarkupToPlainText(string text)
@@ -402,7 +634,7 @@ namespace OneFinder
                 switch (node)
                 {
                     case XCData cdataNode:
-                        AppendPlainTextFragment(cdataNode.Value, builder);
+                        AppendPlainTextFragment(cdataNode.Value, builder, false);
                         break;
                     case XText textNode:
                         builder.Append(textNode.Value);
@@ -466,7 +698,30 @@ namespace OneFinder
         private string NormalizeWhitespace(string text)
         {
             if (string.IsNullOrWhiteSpace(text)) return string.Empty;
-            return WhitespaceRegex.Replace(text, " ").Trim();
+
+            var builder = new StringBuilder(text.Length);
+            bool seenNonWhitespace = false;
+            bool pendingSpace = false;
+
+            foreach (char ch in text)
+            {
+                if (char.IsWhiteSpace(ch))
+                {
+                    pendingSpace = seenNonWhitespace;
+                    continue;
+                }
+
+                if (pendingSpace)
+                {
+                    builder.Append(' ');
+                    pendingSpace = false;
+                }
+
+                builder.Append(ch);
+                seenNonWhitespace = true;
+            }
+
+            return builder.ToString();
         }
 
         private string? GetCurrentPageId()

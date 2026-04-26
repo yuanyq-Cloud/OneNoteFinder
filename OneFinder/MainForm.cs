@@ -40,6 +40,7 @@ namespace OneFinder
         private ModernTextBox   _searchBox    = null!;
         private ModernButton    _searchButton = null!;
         private CheckBox        _currentNotebookOnly = null!;
+        private CheckBox        _fastSearch = null!;
         private ListBox         _resultList   = null!;
         private Label           _statusLabel  = null!;
         private ProgressBar     _progress     = null!;
@@ -189,12 +190,14 @@ namespace OneFinder
             searchContainer.SetSearchBox(_searchBox);
 
             // ── Search Options Panel ────────────────────────────────────────────
-            var optionsPanel = new Panel
+            var optionsPanel = new FlowLayoutPanel
             {
                 Dock = DockStyle.Top,
                 Height = 32,
                 Padding = new Padding(4, 8, 0, 0),
                 BackColor = Color.Transparent,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
             };
 
             _currentNotebookOnly = new CheckBox
@@ -206,7 +209,18 @@ namespace OneFinder
                 Checked = false,
             };
 
+            _fastSearch = new CheckBox
+            {
+                Text = "快速搜索",
+                AutoSize = true,
+                Font = new Font("Microsoft YaHei", 9f),
+                ForeColor = ModernColors.TextSecondary,
+                Checked = false,
+                Margin = new Padding(18, 0, 0, 0),
+            };
+
             optionsPanel.Controls.Add(_currentNotebookOnly);
+            optionsPanel.Controls.Add(_fastSearch);
 
             // ── Results Card ─────────────────────────────────────────
             var resultsCard = new ModernCard
@@ -309,7 +323,10 @@ namespace OneFinder
                 try
                 {
                     using var svc = new OneNoteService();
-                    var results = svc.Search(query, currentNotebookOnly, msg =>
+                    var results = svc.Search(query,
+                        currentNotebookOnly: currentNotebookOnly,
+                        fastSearch: true,
+                        progress: msg =>
                     {
                         if (!token.IsCancellationRequested)
                             BeginInvoke(() => SetStatus(msg));
