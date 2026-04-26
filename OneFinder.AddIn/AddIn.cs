@@ -7,6 +7,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Threading;
 using Extensibility;
 using Microsoft.Office.Core;
 
@@ -88,7 +89,24 @@ namespace OneFinder.AddIn
             Log("OnStartupComplete");
         }
 
-        public void OnBeginShutdown(ref Array custom) { }
+        public void OnBeginShutdown(ref Array custom)
+        {
+            Log("OnBeginShutdown");
+            try
+            {
+                // 通知正在运行的 OneFinder 实例 OneNote 即将关闭
+                if (EventWaitHandle.TryOpenExisting(
+                        "Local\\OneFinder-OneNoteShutdown", out var handle))
+                {
+                    using (handle)
+                        handle.Set();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log(string.Format("OnBeginShutdown exception: {0}", ex.Message));
+            }
+        }
 
         // ------------------------------------------------------------------ //
         //  IRibbonExtensibility
@@ -149,14 +167,20 @@ namespace OneFinder.AddIn
 
                 var procName = Path.GetFileNameWithoutExtension(exe);
                 var procs = Process.GetProcessesByName(procName);
-                if (procs.Length > 0 && procs[0].MainWindowHandle != IntPtr.Zero)
+                var hwnd = procs.Length > 0 ? procs[0].MainWindowHandle : IntPtr.Zero;
+                if (hwnd != IntPtr.Zero)
                 {
                     Log("already running - bring to front");
-                    NativeMethods.ShowWindow(procs[0].MainWindowHandle, 9);
-                    NativeMethods.SetForegroundWindow(procs[0].MainWindowHandle);
+                    NativeMethods.ShowWindow(hwnd, 9); // SW_RESTORE
+                    NativeMethods.SetForegroundWindow(hwnd);
                 }
                 else
                 {
+                    // 进程存在但无主窗口（可能卡死或正在退出），先终止再重启
+                    foreach (var stale in procs)
+                    {
+                        try { stale.Kill(); } catch { }
+                    }
                     Log(string.Format("starting {0}", exe));
                     var p = Process.Start(new ProcessStartInfo
                     {

@@ -47,6 +47,8 @@ namespace OneFinder
         private List<MatchResult> _currentResults = new();
         private CancellationTokenSource? _cts;
         private int _searchVersion;
+        private readonly OneNoteScheduler _scheduler = new();
+        private readonly CancellationTokenSource _shutdownCts = new();
 
         public MainForm()
         {
@@ -57,7 +59,58 @@ namespace OneFinder
             this.Paint += MainForm_Paint;
 
             // Apply purple title bar after handle is created
-            this.HandleCreated += (s, e) => ApplyPurpleTitleBar();
+            this.HandleCreated += (s, e) =>
+            {
+                ApplyPurpleTitleBar();
+                ListenForOneNoteShutdown();
+            };
+
+            // 关闭时释放 STA 线程和 COM 连接
+            this.FormClosed += (s, e) =>
+            {
+                _cts?.Cancel();
+                _shutdownCts.Cancel();
+                _scheduler.Dispose();
+            };
+        }
+
+        /// <summary>
+        /// 在后台线程等待 AddIn 发出的命名事件，收到信号后关闭 OneFinder。
+        /// AddIn 在 OnBeginShutdown（OneNote 即将退出）时 Set 该事件。
+        /// </summary>
+        private void ListenForOneNoteShutdown()
+        {
+            var shutdownEvent = new EventWaitHandle(
+                initialState: false,
+                mode: EventResetMode.ManualReset,
+                name: "Local\\OneFinder-OneNoteShutdown");
+
+            var token = _shutdownCts.Token;
+            System.Threading.Thread listener = new(() =>
+            {
+                try
+                {
+                    // WaitOne 每 500 ms 醒来检查一次取消令牌
+                    while (!token.IsCancellationRequested)
+                    {
+                        if (shutdownEvent.WaitOne(500))
+                        {
+                            if (!token.IsCancellationRequested)
+                                BeginInvoke(Close);
+                            break;
+                        }
+                    }
+                }
+                finally
+                {
+                    shutdownEvent.Dispose();
+                }
+            })
+            {
+                IsBackground = true,
+                Name = "OneNote-Shutdown-Listener",
+            };
+            listener.Start();
         }
 
         private void ApplyPurpleTitleBar()
@@ -297,19 +350,18 @@ namespace OneFinder
             _progress.Visible = true;
             SetStatus("正在搜索…（再次点击可中断并重新搜索）");
 
-            Task.Run(() =>
+            Task.Run(async () =>
             {
                 try
                 {
-                    using var svc = new OneNoteService();
-                    var results = svc.Search(query,
+                    var results = await _scheduler.Run(svc => svc.Search(query,
                         currentNotebookOnly: currentNotebookOnly,
                         fastSearch: true,
                         progress: msg =>
-                    {
-                        if (!token.IsCancellationRequested)
-                            BeginInvoke(() => SetStatus(msg));
-                    }, token);
+                        {
+                            if (!token.IsCancellationRequested)
+                                BeginInvoke(() => SetStatus(msg));
+                        }, token));
 
                     if (token.IsCancellationRequested || searchVersion != _searchVersion) return;
 
@@ -336,7 +388,10 @@ namespace OneFinder
                         BeginInvoke(() =>
                         {
                             if (searchVersion != _searchVersion) return;
-                            SetStatus($"错误：{ex.Message}");
+                            string msg = ex is System.Runtime.InteropServices.COMException || ex is InvalidOperationException
+                                ? "无法连接到 OneNote，请确认 OneNote 已完全启动后重试。"
+                                : $"错误：{ex.Message}";
+                            SetStatus(msg);
                             _progress.Visible = false;
                         });
                 }
@@ -533,18 +588,20 @@ namespace OneFinder
             int idx = _resultList.SelectedIndex;
             if (idx < 0 || idx >= _currentResults.Count) return;
 
-            try
-            {
-                var match = _currentResults[idx];
-                using var svc = new OneNoteService();
-
-                svc.NavigateToPage(match.PageId, match.ObjectId);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"无法打开页面：{ex.Message}",
-                    "OneFinder", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
+            var match = _currentResults[idx];
+            _ = _scheduler.Run(svc => svc.NavigateToPage(match.PageId, match.ObjectId))
+                .ContinueWith(t =>
+                {
+                    if (t.IsFaulted)
+                    {
+                        var ex = t.Exception!.InnerException ?? t.Exception;
+                        string msg = ex is System.Runtime.InteropServices.COMException
+                            ? $"无法连接到 OneNote，请确认 OneNote 已完全启动后重试。\n\n({ex.Message})"
+                            : $"无法打开页面：{ex.Message}";
+                        BeginInvoke(() => MessageBox.Show(msg, "OneFinder",
+                            MessageBoxButtons.OK, MessageBoxIcon.Warning));
+                    }
+                }, TaskScheduler.Default);
         }
 
         private void SetStatus(string text) => _statusLabel.Text = text;

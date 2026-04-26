@@ -135,6 +135,33 @@
           <RegistryValue Name="Description"     Type="string"  Value="OneFinder - OneNote full-text search" />
           <RegistryValue Name="CommandLineSafe" Type="integer" Value="0" />
         </RegistryKey>
+        <!--
+          防止 Office Resiliency 机制在 OneNote 意外崩溃后自动禁用本 AddIn。
+          没有此键时，Office 检测到启动失败会将 LoadBehavior 改为 2 并记入
+          Resiliency\StartupItems，导致后续 OneNote 启动时 AddIn 反复加载失败。
+        -->
+        <RegistryKey Root="HKCU" Key="SOFTWARE\Microsoft\Office\16.0\OneNote\Resiliency\DoNotDisableAddinList">
+          <RegistryValue Name="OneFinder.AddIn" Type="integer" Value="1" />
+        </RegistryKey>
+        <!--
+          安装/升级时主动清除 Resiliency 机制留下的禁用记录，确保 LoadBehavior
+          被 Office 意外改为 2 后重装即可恢复，而无需用户手动修改注册表。
+        -->
+        <RemoveRegistryValue Root="HKCU"
+          Key="SOFTWARE\Microsoft\Office\16.0\OneNote\Resiliency\StartupItems"
+          Name="OneFinder.AddIn" />
+      </Component>
+
+      <!--
+        清理旧版名称 "OneFind.AddIn" 遗留的 AddIn 注册键（项目曾用名）。
+        若残留此键，OneNote 会同时尝试加载两个 AddIn，可能导致按钮重复或加载失败。
+      -->
+      <Component Id="Reg_CleanupOldAddin" Guid="*">
+        <RemoveRegistryKey Root="HKCU"
+          Key="SOFTWARE\Microsoft\Office\OneNote\AddIns\OneFind.AddIn"
+          Action="removeOnInstall" />
+        <RegistryValue Root="HKCU" Key="Software\OneFinder"
+                       Name="OldAddinCleaned" Type="integer" Value="1" KeyPath="yes" />
       </Component>
 
     </ComponentGroup>
