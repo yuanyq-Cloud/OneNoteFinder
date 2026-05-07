@@ -1,0 +1,16 @@
+name: Issue Labeler (Regex)
+on:
+  issues:
+    types: [opened, edited]
+
+jobs:
+  label-component:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: github/issue-labeler@v3.3.0
+        with:
+          repo-token: "${{ secrets.GITHUB_TOKEN }}"
+          configuration-path: .github/labeler-config.yml # 指向你的正则规则文件
+          enable-versioned-regex: 0
