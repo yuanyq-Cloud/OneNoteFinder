@@ -1,0 +1,21 @@
+# .github/labeler-config.yml
+
+# 1. 缺陷类：匹配包含 "bug"、"error"、"崩溃" 或者 "无法启动" 的内容
+bug:
+  - title: ['(?i)bug', '(?i)error', '(?i)crash', '(?i)fail(ed)?']
+  - body: ['(?i)reproduce', '(?i)steps to', '(?i)not working']
+
+# 2. 需求/增强类：匹配 "feature"、"建议"、"希望支持" 等
+enhancement:
+  - title: ['(?i)feature', '(?i)suggest(ion)?', '(?i)improvement']
+  - body: ['(?i)I would like', '(?i)it would be great']
+
+# 3. 提问类：匹配以 "How" 开头，或者包含问号，或者提及 "help"
+question:
+  - title: ['(?i)^how to', '.*\?$', '(?i)question']
+  - body: ['(?i)help me', '(?i)how can I']
+
+# 4. 文档类：专门针对文档反馈
+documentation:
+  - title: ['(?i)doc(s|umentation)?']
+  - body: ['(?i)typo', '(?i)README']
