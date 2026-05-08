@@ -87,15 +87,11 @@ namespace OneFinder
             {
                 try
                 {
-                    while (!token.IsCancellationRequested)
-                    {
-                        if (shutdownEvent.WaitOne(500))
-                        {
-                            if (!token.IsCancellationRequested)
-                                BeginInvoke(Close);
-                            break;
-                        }
-                    }
+                    // WaitAny 真正阻塞，无需轮询：
+                    // idx=0 → OneNote 关闭事件；idx=1 → OneFinder 自身取消
+                    int idx = WaitHandle.WaitAny(new WaitHandle[] { shutdownEvent, token.WaitHandle });
+                    if (idx == 0 && !token.IsCancellationRequested)
+                        BeginInvoke(Close);
                 }
                 finally
                 {

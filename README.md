@@ -1,6 +1,8 @@
 # OneFinder — OneNote 全文搜索工具
 
-一个轻量 Windows 桌面工具，通过 **OneNote COM API** 直接遍历所有笔记本页面并进行全文搜索，无需 Windows Search 索引。
+轻量级 OneNote 插件，遍历所有笔记本页面进行全文搜索，不依赖 WSearch 索引，从而防止因内容未索引而造成的搜索遗漏。
+
+A lightweight OneNote add-in that performs full-text search by traversing all pages across all notebooks, without relying on the Windows Search index, to avoid search omissions caused by unindexed content.
 
 ## 界面预览
 
@@ -35,9 +37,9 @@
 
 ## 注意事项
 
-- 受密码保护的节会被自动跳过
-- 回收站中的页面同样被跳过
-- 笔记本越多、页面越多，首次扫描越慢；建议关键词尽量精确
+- 回收站中的页面、受密码保护的页面会被自动跳过
+- 同一页最多显示5条匹配结果 [5/5]
+- 笔记本越多、页面越多搜索越慢，关键词仅支持完全匹配
 - 单个笔记本页面过多时，搜索期间OneNote可能会短暂未响应（由于 OneNote COM API 的架构限制，OneFinder 必须逐页调用 `GetPageContent()` 由 OneNote 主进程同步处理）
 
 ## 项目结构
@@ -65,8 +67,3 @@
     ├── Ribbon.xml
     └── bin/                       # build outputs for add-in (net48)
 ```
-
-## Todo
-- [ ] 支持进阶搜索语法（AND/OR/NOT、短语搜索等）
-- [ ] 性能优化（调试模式）
-- [ ] 优化OneNote退出时的监听

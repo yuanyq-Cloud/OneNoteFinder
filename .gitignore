@@ -5,4 +5,5 @@ OneFinder.AddIn/bin/
 installer/*.msi
 installer/*.wixpdb
 installer/*.wixobj
+todo.md
 .vs/

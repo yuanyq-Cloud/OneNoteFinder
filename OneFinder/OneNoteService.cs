@@ -191,8 +191,6 @@ namespace OneFinder
                             else
                             {
                                 var pageDoc = XDocument.Parse(pageXml);
-
-                                // 提取所有 T 元素（文本节点）
                                 ExtractTextMatches(pageDoc, normalizedQuery, snippets, hitObjectIds, fastSearch: false);
                             }
 
@@ -209,8 +207,10 @@ namespace OneFinder
                                 });
                             }
                         }
-                        catch
+                        catch (Exception ex)
                         {
+                            // Skip this page on error (locked, corrupted, or insufficient permissions)
+                            // Uncomment for debugging: Debug.WriteLine($"Failed to search page {pageName}: {ex.Message}");
                         }
                     }
                 }
@@ -303,7 +303,7 @@ namespace OneFinder
             }
         }
 
-        private void ExtractTextMatches(XDocument pageDoc, string query, 
+        private void ExtractTextMatches(XDocument pageDoc, string query,
             List<string> snippets, List<string> hitObjectIds, bool fastSearch)
         {
             foreach (var textElement in pageDoc.Descendants(NS + "T"))

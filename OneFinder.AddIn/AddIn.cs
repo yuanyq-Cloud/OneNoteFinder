@@ -21,7 +21,7 @@ namespace OneFinder.AddIn
         public const string AddinClsid  = "6B29FC40-CA47-1067-B31D-00DD010662DA";
         public const string AddinProgId = "OneFinder.AddIn";
 
-        private IRibbonUI _ribbon;
+        private IRibbonUI? _ribbon;
 
         private static string GetInstallDir()
         {
@@ -32,18 +32,24 @@ namespace OneFinder.AddIn
                 {
                     var uri = new Uri(codeBase);
                     if (uri.IsFile)
-                        return Path.GetDirectoryName(uri.LocalPath);
+                        return Path.GetDirectoryName(uri.LocalPath) ?? AppDomain.CurrentDomain.BaseDirectory;
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Log($"GetInstallDir (CodeBase): {ex.Message}");
+            }
 
             try
             {
                 var loc = Assembly.GetExecutingAssembly().Location;
                 if (!string.IsNullOrEmpty(loc))
-                    return Path.GetDirectoryName(loc);
+                    return Path.GetDirectoryName(loc) ?? AppDomain.CurrentDomain.BaseDirectory;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Log($"GetInstallDir (Location): {ex.Message}");
+            }
 
             return AppDomain.CurrentDomain.BaseDirectory;
         }
@@ -53,22 +59,23 @@ namespace OneFinder.AddIn
             try
             {
                 var path = Path.Combine(Path.GetTempPath(), "OneFinder.AddIn.log");
-                File.AppendAllText(path,
-                    string.Format("[{0:HH:mm:ss}] {1}{2}",
-                        DateTime.Now, msg, Environment.NewLine));
+                File.AppendAllText(path, $"[{DateTime.Now:HH:mm:ss}] {msg}{Environment.NewLine}");
             }
-            catch { }
+            catch (Exception ex)
+            {
+                // Silent fallback - can't log if logging fails
+                System.Diagnostics.Debug.WriteLine($"Log write failed: {ex.Message}");
+            }
         }
 
-        public void OnConnection(object Application, ext_ConnectMode ConnectMode,
-            object AddInInst, ref Array custom)
+        public void OnConnection(object Application, ext_ConnectMode ConnectMode, object AddInInst, ref Array custom)
         {
-            Log(string.Format("OnConnection ConnectMode={0}", ConnectMode));
+            Log($"OnConnection ConnectMode={ConnectMode}");
         }
 
         public void OnDisconnection(ext_DisconnectMode RemoveMode, ref Array custom)
         {
-            Log(string.Format("OnDisconnection RemoveMode={0}", RemoveMode));
+            Log($"OnDisconnection RemoveMode={RemoveMode}");
         }
 
         public void OnAddInsUpdate(ref Array custom) { }
@@ -83,8 +90,7 @@ namespace OneFinder.AddIn
             Log("OnBeginShutdown");
             try
             {
-                if (EventWaitHandle.TryOpenExisting(
-                        "Local\\OneFinder-OneNoteShutdown", out var handle))
+                if (EventWaitHandle.TryOpenExisting("Local\\OneFinder-OneNoteShutdown", out var handle))
                 {
                     using (handle)
                         handle.Set();
@@ -92,13 +98,13 @@ namespace OneFinder.AddIn
             }
             catch (Exception ex)
             {
-                Log(string.Format("OnBeginShutdown exception: {0}", ex.Message));
+                Log($"OnBeginShutdown: {ex.Message}");
             }
         }
 
         public string GetCustomUI(string RibbonID)
         {
-            Log(string.Format("GetCustomUI RibbonID={0}", RibbonID));
+            Log($"GetCustomUI RibbonID={RibbonID}");
             try
             {
                 var asm = Assembly.GetExecutingAssembly();
@@ -112,14 +118,14 @@ namespace OneFinder.AddIn
                     using (var reader = new StreamReader(stream))
                     {
                         var xml = reader.ReadToEnd();
-                        Log(string.Format("GetCustomUI OK, {0} chars", xml.Length));
+                        Log($"GetCustomUI OK, {xml.Length} chars");
                         return xml;
                     }
                 }
             }
             catch (Exception ex)
             {
-                Log(string.Format("GetCustomUI exception: {0}", ex.Message));
+                Log($"GetCustomUI: {ex.Message}");
                 return string.Empty;
             }
         }
@@ -137,17 +143,18 @@ namespace OneFinder.AddIn
             {
                 var dir = GetInstallDir();
                 var exe = Path.Combine(dir, "OneFinder.exe");
-                Log(string.Format("exe path={0} exists={1}", exe, File.Exists(exe)));
+                Log($"exe path={exe} exists={File.Exists(exe)}");
 
                 if (!File.Exists(exe))
                 {
-                    Log(string.Format("ERROR: exe not found at {0}", exe));
+                    Log($"ERROR: exe not found at {exe}");
                     return;
                 }
 
                 var procName = Path.GetFileNameWithoutExtension(exe);
                 var procs = Process.GetProcessesByName(procName);
                 var hwnd = procs.Length > 0 ? procs[0].MainWindowHandle : IntPtr.Zero;
+                
                 if (hwnd != IntPtr.Zero)
                 {
                     Log("already running - bring to front");
@@ -156,23 +163,40 @@ namespace OneFinder.AddIn
                 }
                 else
                 {
+                    // Kill stale processes before starting new one
                     foreach (var stale in procs)
                     {
-                        try { stale.Kill(); } catch { }
+                        try
+                        {
+                            Log($"killing stale pid={stale.Id}");
+                            stale.Kill();
+                            stale.WaitForExit(1000); // Wait up to 1s for process to exit
+                        }
+                        catch (Exception ex)
+                        {
+                            Log($"kill stale process: {ex.Message}");
+                        }
+                        finally
+                        {
+                            stale.Dispose();
+                        }
                     }
-                    Log(string.Format("starting {0}", exe));
-                    var p = Process.Start(new ProcessStartInfo
+
+                    Log($"starting {exe}");
+                    using (var p = Process.Start(new ProcessStartInfo
                     {
-                        FileName         = exe,
-                        UseShellExecute  = true,
+                        FileName = exe,
+                        UseShellExecute = true,
                         WorkingDirectory = dir
-                    });
-                    Log(string.Format("started pid={0}", p == null ? -1 : p.Id));
+                    }))
+                    {
+                        Log($"started pid={p?.Id ?? -1}");
+                    }
                 }
             }
             catch (Exception ex)
             {
-                Log(string.Format("OnSearchClick exception: {0}\n{1}", ex.Message, ex.StackTrace));
+                Log($"OnSearchClick: {ex.Message}\n{ex.StackTrace}");
             }
         }
     }
