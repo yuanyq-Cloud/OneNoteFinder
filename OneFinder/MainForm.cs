@@ -19,6 +19,16 @@ namespace OneFinder
         private const int DWMWA_CAPTION_COLOR = 35;
         private const int DWMWA_BORDER_COLOR = 34;
 
+        // Foreground activation helpers
+        [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+        [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
+        [DllImport("user32.dll")] private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+        [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
+        [DllImport("user32.dll")] private static extern bool BringWindowToTop(IntPtr hWnd);
+        [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+        private const int SW_RESTORE = 9;
+
         // Color Scheme
         public static class ModernColors
         {
@@ -63,6 +73,8 @@ namespace OneFinder
                 ListenForOneNoteShutdown();
             };
 
+            this.Shown += (s, e) => ForceActivate();
+
             // 关闭时释放 STA 线程和 COM 连接
             this.FormClosed += (s, e) =>
             {
@@ -77,8 +89,14 @@ namespace OneFinder
         /// </summary>
         private void ListenForOneNoteShutdown()
         {
-            // Signal 1: OneFinder-ReleaseCOM — OneNote 即将退出，立即释放 COM 对象（仅处理一次）
+            // Signal 0: OneFinder-Activate      — 已运行时再次点击按钮，置顶窗口（AutoReset，可重复触发）
+            // Signal 1: OneFinder-ReleaseCOM    — OneNote 即将退出，立即释放 COM 对象（仅处理一次）
             // Signal 2: OneFinder-OneNoteShutdown — OneNote 已开始关闭，关闭 OneFinder 窗口
+            var activateEvent = new EventWaitHandle(
+                initialState: false,
+                mode: EventResetMode.AutoReset,
+                name: "Local\\OneFinder-Activate");
+
             var releaseEvent = new EventWaitHandle(
                 initialState: false,
                 mode: EventResetMode.ManualReset,
@@ -96,39 +114,49 @@ namespace OneFinder
                 {
                     OneNoteService.Log("[MainForm] Shutdown listener started");
 
-                    // Phase 1: wait for ReleaseCOM (or shutdown/cancel directly)
-                    int idx = WaitHandle.WaitAny(new WaitHandle[] { releaseEvent, shutdownEvent, token.WaitHandle });
-                    OneNoteService.Log($"[MainForm] Phase1 WaitAny idx={idx}");
+                    WaitHandle[] phase1Handles = { activateEvent, releaseEvent, shutdownEvent, token.WaitHandle };
 
-                    if (!token.IsCancellationRequested && idx == 0)
+                    // Phase 1: handle Activate (repeatable) and wait for ReleaseCOM/Shutdown/Cancel
+                    while (true)
                     {
-                        // Release COM once, then move to Phase 2
-                        OneNoteService.Log("[MainForm] ReleaseCOM signal received, releasing COM...");
-                        _ = _scheduler.ReleaseCom().ContinueWith(t =>
-                            OneNoteService.Log($"[MainForm] ReleaseCom task completed, faulted={t.IsFaulted}"));
-                        idx = -1; // proceed to phase 2
+                        int idx = WaitHandle.WaitAny(phase1Handles);
+                        OneNoteService.Log($"[MainForm] Phase1 WaitAny idx={idx}");
+
+                        if (token.IsCancellationRequested)
+                        {
+                            OneNoteService.Log("[MainForm] Cancelled in Phase1, listener exiting");
+                            return;
+                        }
+
+                        if (idx == 0) // Activate: bring window to front
+                        {
+                            OneNoteService.Log("[MainForm] Activate signal received");
+                            BeginInvoke((Action)ForceActivate);
+                            continue; // AutoReset — safe to loop
+                        }
+
+                        if (idx == 1) // ReleaseCOM: release COM then move to Phase 2
+                        {
+                            OneNoteService.Log("[MainForm] ReleaseCOM signal received, releasing COM...");
+                            _ = _scheduler.ReleaseCom().ContinueWith(t =>
+                                OneNoteService.Log($"[MainForm] ReleaseCom task completed, faulted={t.IsFaulted}"));
+                            break; // proceed to phase 2
+                        }
+
+                        if (idx == 2) // Shutdown arrived without ReleaseCOM
+                        {
+                            OneNoteService.Log("[MainForm] Shutdown signal received in Phase1, closing window");
+                            BeginInvoke(Close);
+                            return;
+                        }
                     }
 
-                    if (!token.IsCancellationRequested && idx == 1)
-                    {
-                        // Shutdown arrived directly in Phase 1 (no ReleaseCOM first)
-                        OneNoteService.Log("[MainForm] Shutdown signal received in Phase1, closing window");
-                        BeginInvoke(Close);
-                        return;
-                    }
-
-                    if (token.IsCancellationRequested)
-                    {
-                        OneNoteService.Log("[MainForm] Cancelled in Phase1, listener exiting");
-                        return;
-                    }
-
-                    // Phase 2: ReleaseCOM was handled — now wait only for shutdown or cancel
+                    // Phase 2: ReleaseCOM handled — wait only for shutdown or cancel
                     OneNoteService.Log("[MainForm] Phase2: waiting for shutdown signal...");
-                    idx = WaitHandle.WaitAny(new WaitHandle[] { shutdownEvent, token.WaitHandle });
-                    OneNoteService.Log($"[MainForm] Phase2 WaitAny idx={idx}");
+                    int idx2 = WaitHandle.WaitAny(new WaitHandle[] { shutdownEvent, token.WaitHandle });
+                    OneNoteService.Log($"[MainForm] Phase2 WaitAny idx={idx2}");
 
-                    if (idx == 0 && !token.IsCancellationRequested)
+                    if (idx2 == 0 && !token.IsCancellationRequested)
                     {
                         OneNoteService.Log("[MainForm] Shutdown signal received in Phase2, closing window");
                         BeginInvoke(Close);
@@ -140,6 +168,7 @@ namespace OneFinder
                 }
                 finally
                 {
+                    activateEvent.Dispose();
                     releaseEvent.Dispose();
                     shutdownEvent.Dispose();
                     OneNoteService.Log("[MainForm] Shutdown listener exited");
@@ -164,6 +193,30 @@ namespace OneFinder
                 DwmSetWindowAttribute(this.Handle, DWMWA_CAPTION_COLOR, ref bgrColor, sizeof(int));
                 DwmSetWindowAttribute(this.Handle, DWMWA_BORDER_COLOR, ref bgrColor, sizeof(int));
             }
+        }
+
+        /// <summary>
+        /// 强制将窗口置于前台。
+        /// 通过 AttachThreadInput 将本线程的输入队列临时挂接到当前前台线程，
+        /// 绕过 Windows 对 SetForegroundWindow 的限制。
+        /// </summary>
+        private void ForceActivate()
+        {
+            var hwnd = this.Handle;
+            ShowWindow(hwnd, SW_RESTORE);
+
+            IntPtr fgHwnd = GetForegroundWindow();
+            uint fgTid = GetWindowThreadProcessId(fgHwnd, out _);
+            uint myTid = GetCurrentThreadId();
+
+            if (fgTid != myTid)
+                AttachThreadInput(myTid, fgTid, true);
+
+            SetForegroundWindow(hwnd);
+            BringWindowToTop(hwnd);
+
+            if (fgTid != myTid)
+                AttachThreadInput(myTid, fgTid, false);
         }
 
         private void MainForm_Paint(object? sender, PaintEventArgs e)

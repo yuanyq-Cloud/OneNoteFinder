@@ -203,9 +203,8 @@ namespace OneFinder.AddIn
                 
                 if (hwnd != IntPtr.Zero)
                 {
-                    Log("already running - bring to front");
-                    NativeMethods.ShowWindow(hwnd, 9);
-                    NativeMethods.SetForegroundWindow(hwnd);
+                    Log("already running - signaling activate");
+                    SignalEvent("Local\\OneFinder-Activate", "Activate");
                 }
                 else
                 {
@@ -237,6 +236,13 @@ namespace OneFinder.AddIn
                     }))
                     {
                         Log($"started pid={p?.Id ?? -1}");
+                        if (p != null)
+                        {
+                            // Grant the new process permission to call SetForegroundWindow.
+                            // Without this, Windows blocks foreground activation from a
+                            // process that wasn't started by the current foreground owner.
+                            NativeMethods.AllowSetForegroundWindow(p.Id);
+                        }
                     }
                 }
             }
@@ -255,5 +261,9 @@ namespace OneFinder.AddIn
 
         [DllImport("user32.dll")]
         internal static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool AllowSetForegroundWindow(int dwProcessId);
     }
 }
