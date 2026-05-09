@@ -77,6 +77,13 @@ namespace OneFinder
         /// </summary>
         private void ListenForOneNoteShutdown()
         {
+            // Signal 1: OneFinder-ReleaseCOM — OneNote 即将退出，立即释放 COM 对象（仅处理一次）
+            // Signal 2: OneFinder-OneNoteShutdown — OneNote 已开始关闭，关闭 OneFinder 窗口
+            var releaseEvent = new EventWaitHandle(
+                initialState: false,
+                mode: EventResetMode.ManualReset,
+                name: "Local\\OneFinder-ReleaseCOM");
+
             var shutdownEvent = new EventWaitHandle(
                 initialState: false,
                 mode: EventResetMode.ManualReset,
@@ -87,15 +94,55 @@ namespace OneFinder
             {
                 try
                 {
-                    // WaitAny 真正阻塞，无需轮询：
-                    // idx=0 → OneNote 关闭事件；idx=1 → OneFinder 自身取消
-                    int idx = WaitHandle.WaitAny(new WaitHandle[] { shutdownEvent, token.WaitHandle });
-                    if (idx == 0 && !token.IsCancellationRequested)
+                    OneNoteService.Log("[MainForm] Shutdown listener started");
+
+                    // Phase 1: wait for ReleaseCOM (or shutdown/cancel directly)
+                    int idx = WaitHandle.WaitAny(new WaitHandle[] { releaseEvent, shutdownEvent, token.WaitHandle });
+                    OneNoteService.Log($"[MainForm] Phase1 WaitAny idx={idx}");
+
+                    if (!token.IsCancellationRequested && idx == 0)
+                    {
+                        // Release COM once, then move to Phase 2
+                        OneNoteService.Log("[MainForm] ReleaseCOM signal received, releasing COM...");
+                        _ = _scheduler.ReleaseCom().ContinueWith(t =>
+                            OneNoteService.Log($"[MainForm] ReleaseCom task completed, faulted={t.IsFaulted}"));
+                        idx = -1; // proceed to phase 2
+                    }
+
+                    if (!token.IsCancellationRequested && idx == 1)
+                    {
+                        // Shutdown arrived directly in Phase 1 (no ReleaseCOM first)
+                        OneNoteService.Log("[MainForm] Shutdown signal received in Phase1, closing window");
                         BeginInvoke(Close);
+                        return;
+                    }
+
+                    if (token.IsCancellationRequested)
+                    {
+                        OneNoteService.Log("[MainForm] Cancelled in Phase1, listener exiting");
+                        return;
+                    }
+
+                    // Phase 2: ReleaseCOM was handled — now wait only for shutdown or cancel
+                    OneNoteService.Log("[MainForm] Phase2: waiting for shutdown signal...");
+                    idx = WaitHandle.WaitAny(new WaitHandle[] { shutdownEvent, token.WaitHandle });
+                    OneNoteService.Log($"[MainForm] Phase2 WaitAny idx={idx}");
+
+                    if (idx == 0 && !token.IsCancellationRequested)
+                    {
+                        OneNoteService.Log("[MainForm] Shutdown signal received in Phase2, closing window");
+                        BeginInvoke(Close);
+                    }
+                    else
+                    {
+                        OneNoteService.Log("[MainForm] Cancelled in Phase2, listener exiting");
+                    }
                 }
                 finally
                 {
+                    releaseEvent.Dispose();
                     shutdownEvent.Dispose();
+                    OneNoteService.Log("[MainForm] Shutdown listener exited");
                 }
             })
             {

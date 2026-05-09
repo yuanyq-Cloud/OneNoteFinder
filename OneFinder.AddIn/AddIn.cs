@@ -76,6 +76,27 @@ namespace OneFinder.AddIn
         public void OnDisconnection(ext_DisconnectMode RemoveMode, ref Array custom)
         {
             Log($"OnDisconnection RemoveMode={RemoveMode}");
+            try
+            {
+                if (_ribbon != null)
+                {
+                    Log("OnDisconnection: releasing IRibbonUI COM reference");
+                    Marshal.ReleaseComObject(_ribbon);
+                    _ribbon = null;
+                    Log("OnDisconnection: IRibbonUI released");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"OnDisconnection: release ribbon error: {ex.Message}");
+            }
+
+            // Force GC to collect any other lingering COM RCWs (e.g. Application object
+            // passed to OnConnection) so ONENOTE.EXE reference count can reach zero.
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            Log("OnDisconnection: GC collect done");
         }
 
         public void OnAddInsUpdate(ref Array custom) { }
@@ -87,18 +108,43 @@ namespace OneFinder.AddIn
 
         public void OnBeginShutdown(ref Array custom)
         {
-            Log("OnBeginShutdown");
+            Log("OnBeginShutdown: start");
+
+            // Step 1: Signal OneFinder to release COM references immediately.
+            // This must happen before OneNote starts tearing down its COM infrastructure.
+            SignalEvent("Local\\OneFinder-ReleaseCOM", "ReleaseCOM");
+
+            // Small delay to allow OneFinder's STA thread to process the ReleaseCOM action
+            // before OneNote proceeds with shutdown and invalidates COM objects.
+            System.Threading.Thread.Sleep(300);
+            Log("OnBeginShutdown: post-ReleaseCOM delay elapsed");
+
+            // Step 2: Signal OneFinder to close its window.
+            SignalEvent("Local\\OneFinder-OneNoteShutdown", "OneNoteShutdown");
+
+            Log("OnBeginShutdown: done");
+        }
+
+        private static void SignalEvent(string name, string label)
+        {
             try
             {
-                if (EventWaitHandle.TryOpenExisting("Local\\OneFinder-OneNoteShutdown", out var handle))
+                if (EventWaitHandle.TryOpenExisting(name, out var handle))
                 {
                     using (handle)
+                    {
                         handle.Set();
+                        Log($"SignalEvent: '{label}' signaled OK");
+                    }
+                }
+                else
+                {
+                    Log($"SignalEvent: '{label}' handle not found (OneFinder not running?)");
                 }
             }
             catch (Exception ex)
             {
-                Log($"OnBeginShutdown: {ex.Message}");
+                Log($"SignalEvent '{label}': {ex.Message}");
             }
         }
 

@@ -85,9 +85,22 @@ namespace OneFinder
         private static readonly Regex LiteralCDataRegex = new(@"<!\[CDATA\[(.*?)\]\]>", RegexOptions.Singleline | RegexOptions.Compiled);
         private const StringComparison SearchComparison = StringComparison.OrdinalIgnoreCase;
 
+        internal static void Log(string msg)
+        {
+            try
+            {
+                var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "OneFinder.log");
+                System.IO.File.AppendAllText(path,
+                    $"[{DateTime.Now:HH:mm:ss.fff}][tid={System.Threading.Thread.CurrentThread.ManagedThreadId} apt={System.Threading.Thread.CurrentThread.GetApartmentState()}] {msg}{Environment.NewLine}");
+            }
+            catch { }
+        }
+
         public OneNoteService()
         {
+            Log("OneNoteService.ctor: creating COM Application...");
             _app = new Application();
+            Log("OneNoteService.ctor: COM Application created OK");
         }
 
         /// <summary>
@@ -207,10 +220,9 @@ namespace OneFinder
                                 });
                             }
                         }
-                        catch (Exception ex)
+                        catch (Exception)
                         {
                             // Skip this page on error (locked, corrupted, or insufficient permissions)
-                            // Uncomment for debugging: Debug.WriteLine($"Failed to search page {pageName}: {ex.Message}");
                         }
                     }
                 }
@@ -739,7 +751,9 @@ namespace OneFinder
             {
                 if (_app != null)
                 {
-                    System.Runtime.InteropServices.Marshal.ReleaseComObject(_app);
+                    Log($"OneNoteService.Dispose: calling FinalReleaseComObject on tid={System.Threading.Thread.CurrentThread.ManagedThreadId} apt={System.Threading.Thread.CurrentThread.GetApartmentState()}");
+                    int remaining = System.Runtime.InteropServices.Marshal.FinalReleaseComObject(_app);
+                    Log($"OneNoteService.Dispose: FinalReleaseComObject done, remaining={remaining}");
                     _app = null;
                 }
                 _disposed = true;
