@@ -13,6 +13,7 @@ namespace OneFinder
 
         private void InitializeComponent()
         {
+            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(MainForm));
             SuspendLayout();
             // 
             // MainForm
@@ -21,6 +22,7 @@ namespace OneFinder
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(771, 563);
             Name = "MainForm";
+            Icon = new System.Drawing.Icon(typeof(MainForm).Assembly.GetManifestResourceStream("OneFinder.app.ico")!);
             ResumeLayout(false);
         }
     }

@@ -16,6 +16,7 @@
          keeps the install footprint to only the app DLL + EXE stub (~0.3 MB total).
          The installer detects and requires the .NET 8 Desktop Runtime. -->
     <PublishReadyToRun>false</PublishReadyToRun>
+    <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <!-- OneNote COM Interop — 直接引用 GAC 中的互操作程序集，避免 dotnet publish 不支持 COMReference -->
@@ -27,6 +28,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="app.ico" />
   </ItemGroup>
 
 </Project>

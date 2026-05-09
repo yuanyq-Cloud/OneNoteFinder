@@ -181,6 +181,8 @@ namespace OneFinder
             listener.Start();
         }
 
+        private const int DWMWA_TEXT_COLOR = 36;
+
         private void ApplyPurpleTitleBar()
         {
             if (Environment.OSVersion.Version.Major >= 10)
@@ -192,6 +194,12 @@ namespace OneFinder
 
                 DwmSetWindowAttribute(this.Handle, DWMWA_CAPTION_COLOR, ref bgrColor, sizeof(int));
                 DwmSetWindowAttribute(this.Handle, DWMWA_BORDER_COLOR, ref bgrColor, sizeof(int));
+
+                // Fix caption text always showing as translucent when window hasn't been
+                // the foreground owner for long. Explicitly pin it to white so DWM
+                // never falls back to its inactive-state grey regardless of focus.
+                int white = 0x00FFFFFF;
+                DwmSetWindowAttribute(this.Handle, DWMWA_TEXT_COLOR, ref white, sizeof(int));
             }
         }
 
